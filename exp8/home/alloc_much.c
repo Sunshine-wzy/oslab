@@ -17,8 +17,8 @@ int main()
 		printf("alloc_much: 8MB from %p to %p\n", p, p + size);
 	}
 	{
-		printf("alloc_much: allocating extra 4MB memory\n");
-		size = 4 * 1024 * 1024;
+		printf("alloc_much: allocating extra 2.5MB memory\n");
+		size = 2 * 1024 * 1024 + 512 * 1024;
 		p = malloc(size);
 		for (j = 0; j < size; j += 4096) {
 			p[j] = 0;

@@ -8,6 +8,8 @@ if [ "$?" != "0" ]; then
 	exit
 fi
 
+$OSLAB_PATH/exp8/setup.sh
+
 $OSLAB_PATH/env/umount_if_needed.sh
 
 $BOCHS_PATH/bochs-gdb -q -f $BOCHS_PATH/bochsrc.bxrc

@@ -111,8 +111,7 @@ int prt_handler(int type)
 }
 int with_handler(int handler)
 {
-	return handler > 512;
-	// return handler < 2;
+	return handler < 2;
 }
 static int persist = 256;
 
@@ -134,10 +133,10 @@ unsigned long swap_out_page(unsigned long page)
 
 	h = prt_handler(PRT_SWAP_OUT_PAGE);
 	if (with_handler(h)) {
-		printk("<swap_out_page>: page=%x, blk=%x, ", page, blk);
+		printk("[kernel] swap_out_page: page=%x, blk=%x\n", page, blk);
 	}
 	for (i = 0; i < 4; i++) {
-		nr[i] = MAP_VM(blk) * 4 + i;
+		nr[i] = (blk >> 10) + i;
 	}
 	i = persist > 8 ? 8 : persist;
 	persist -= i;
@@ -164,9 +163,6 @@ unsigned long swap_out_page(unsigned long page)
 	}
 	mem_map[MAP_NR(page)] = 0;
 	mem_puda[MAP_NR(page)] = 0;
-	if (with_handler(h)) {
-		printk("</swap_out_page>\n");
-	}
 	invalidate();
 	return blk;
 }
@@ -185,10 +181,10 @@ void swap_in_page(unsigned long page, unsigned long hd_block)
 
 	h = prt_handler(PRT_SWAP_IN_PAGE);
 	if (with_handler(h)) {
-		printk("<swap_in_page> page=%x, hd_block=%x, ", page, hd_block);
+		printk("[kernel] swap_in_page: page=%x, hd_block=%x\n", page, hd_block);
 	}
 	for (i = 0; i < 4; i++) {
-		nr[i] = MAP_VM(hd_block) * 4 + i;
+		nr[i] = (hd_block >> 10) + i;
 	}
 	i = persist > 8 ? 8 : persist;
 	persist -= i;
@@ -211,9 +207,6 @@ void swap_in_page(unsigned long page, unsigned long hd_block)
 				pg_table[j] = page | 1 | (pg_table[j] & 0xf);
 			}
 		}
-	}
-	if (with_handler(h)) {
-		printk("</swap_in_page>%s\n", persist == 256 ? " (real ending)" : "");
 	}
 	mem_puda[MAP_NR(page)] = 0x1;
 	invalidate();
@@ -280,7 +273,7 @@ unsigned long clock_algo()
 			if ((mem_puda[page] & 0x3) == 0) {
 				clock_ptr = (page + PAGING_PAGES - 1) % PAGING_PAGES;
 				if (with_handler(h)) {
-					printk("clock_algo[%d]: page=%x, puda=%x\n", (!turn) * 2 + 1, (page << 12) + LOW_MEM, (mem_puda[page]));
+					printk("[kernel] clock_algo[%d]: page=%x, DA=%x\n", (!turn) * 2 + 1, (page << 12) + LOW_MEM, (mem_puda[page] & 0x3));
 				}
 				return (page << 12) + LOW_MEM;
 			}
@@ -297,7 +290,7 @@ unsigned long clock_algo()
 			if ((mem_puda[page] & 0x3) == 2) {
 				clock_ptr = (page + PAGING_PAGES - 1) % PAGING_PAGES;
 				if (with_handler(h)) {
-					printk("clock_algo[%d]: page=%x, puda=%x\n", (!turn) * 2 + 2, (page << 12) + LOW_MEM, (mem_puda[page]));
+					printk("[kernel] clock_algo[%d]: page=%x, DA=%x\n", (!turn) * 2 + 2, (page << 12) + LOW_MEM, (mem_puda[page] & 0x3));
 				}
 				return (page << 12) + LOW_MEM;
 			} else {
@@ -316,11 +309,11 @@ unsigned long clock_algo()
 					continue;
 				page = (pg_table[j] & 0xfffff000);
 				if ((i << 22) + (j << 12) >= current->start_code && (i << 22) + (j << 12) < current->start_code + current->brk && current->executable) {
-					printk("clock_algo: page=%x, addr=%x, uda=%x\n", page, (i << 22) + (j << 12), (mem_puda[MAP_NR(page)]));
+					printk("[kernel] clock_algo: page=%x, addr=%x, uda=%x\n", page, (i << 22) + (j << 12), (mem_puda[MAP_NR(page)]));
 				}
 			}
 		}
-		printk("clock_algo: no page found\n");
+		printk("[kernel] clock_algo: no page found\n");
 	}
 	return 0;
 }
@@ -348,7 +341,7 @@ int find_on_vm(unsigned long v_addr)
 
 	h = prt_handler(PRT_FIND_ON_VM);
 	if (with_handler(h)) {
-		printk("find_on_vm: v_addr=%x, blk=%x\n", v_addr, blk);
+		printk("[kernel] find_on_vm: v_addr=%x, blk=%x\n", v_addr, blk);
 	}
 	page = clock_algo();
 	if (!page)
@@ -431,17 +424,8 @@ int free_page_tables(unsigned long from,unsigned long size)
 	unsigned long * dir, nr;
 	int i, last;
 
-	if (from & 0x3fffff) {
-		printk("free_page_tables called with wrong alignment: %x %x\n", from, size);
-		last = 0;
-		for (i = 0; i < VM_PAGES; i++) {
-			if (vm_map[i]) {
-				last = i;
-			}
-		}
-		printk("last vm block: %d %x\n", last, (last << 12) + LOW_VM);
+	if (from & 0x3fffff)
 		panic("free_page_tables called with wrong alignment");
-	}
 	if (!from)
 		panic("Trying to free up swapper memory space");
 	size = (size + 0x3fffff) >> 22;
@@ -610,9 +594,7 @@ void get_empty_page(unsigned long address)
 {
 	unsigned long tmp;
 
-	if (!(tmp=get_free_page()) || !put_page(tmp,address)) {
-		printk("No free pages, when trying to get %p, start_code=%p\n",
-			   address, current->start_code);
+	if (!(tmp = get_free_page()) || !put_page(tmp, address)) {
 		free_page(tmp);		/* 0 is ok - ignored */
 		oom();
 	}
