@@ -14,14 +14,16 @@ int main()
 		for (j = 0; j < size; j += 4096) {
 			p[j] = 0;
 		}
+		printf("alloc_much: 8MB from %p to %p\n", p, p + size);
 	}
 	{
-		printf("alloc_much: allocating extra 5MB memory\n");
-		size = 5 * 1024 * 1024;
+		printf("alloc_much: allocating extra 4MB memory\n");
+		size = 4 * 1024 * 1024;
 		p = malloc(size);
 		for (j = 0; j < size; j += 4096) {
 			p[j] = 0;
 		}
 	}
+	printf("alloc_much: finished\n");
 	return 0;
 }

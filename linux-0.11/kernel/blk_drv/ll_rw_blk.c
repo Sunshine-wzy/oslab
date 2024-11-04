@@ -20,6 +20,8 @@
  */
 struct request request[NR_REQUEST];
 
+struct request vm_req;
+
 /*
  * used to wait on when there are no free requests
  */

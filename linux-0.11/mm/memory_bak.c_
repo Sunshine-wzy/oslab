@@ -179,7 +179,7 @@ unsigned long swap_out_page(unsigned long page)
 	for (i = 0; i < 4; i++) {
 		nr[i] = MAP_VM(blk) * 4 + i;
 	}
-	bwrite_page(page, VM_DEV, nr);
+	vm_write_page(page, VM_DEV, nr);
 	if (with_handler(h)) {
 		printk("</swap_out_page>\n");
 	}

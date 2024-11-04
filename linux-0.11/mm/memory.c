@@ -59,54 +59,19 @@ static unsigned char mem_map[PAGING_PAGES] = {
 };
 
 #define VM_DEV 0x305
-#define VM_PAGES (PAGING_PAGES << 4)
+#define VM_PAGES (PAGING_PAGES * 2)
 #define LOW_VM HIGH_MEMORY
-#define HIGH_VM (LOW_VM + VM_PAGES)
+#define HIGH_VM (LOW_VM + (VM_PAGES << 12))
 #define MAP_VM(addr) (((addr) - LOW_VM) >> 12)
-static int vm_lock = 0;
-static struct task_struct *vm_lock_task = NULL;
 static unsigned char vm_map[VM_PAGES] = {
 	0,
 };
 
-// 2 1 0: System, Dirty, Accessed
-static unsigned char mem_sda[PAGING_PAGES] = {
+// 3 2 1 0: Pending, User, Dirty, Accessed
+static unsigned char mem_puda[PAGING_PAGES] = {
 	0,
 };
 static unsigned long clock_ptr = PAGING_PAGES - 1;
-
-void get_vm_lock(char *task)
-{
-	while (1) {
-		cli();
-		if (vm_lock == 0) {
-			vm_lock = 1;
-			sti();
-			break;
-		}
-		cli();
-		sleep_on(&vm_lock_task);
-	}
-	return;
-}
-int try_get_vm_lock()
-{
-	cli();
-	if (vm_lock == 0) {
-		vm_lock = 1;
-		sti();
-		return 1;
-	}
-	sti();
-	return 0;
-}
-void free_vm_lock()
-{
-	cli();
-	vm_lock = 0;
-	wake_up(&vm_lock_task);
-	sti();
-}
 
 unsigned long get_free_vm_blk(int count)
 {
@@ -118,7 +83,7 @@ unsigned long get_free_vm_blk(int count)
 	for (i = 0; i < VM_PAGES; i++) {
 		if (!vm_map[i]) {
 			vm_map[i] = count;
-			return LOW_VM + i * 0x1000;
+			return LOW_VM + (i << 12);
 		}
 	}
 
@@ -129,7 +94,7 @@ void free_vm_blk(unsigned long addr)
 	if (addr < LOW_VM)
 		return;
 	if (addr >= HIGH_VM)
-		panic("trying to free nonexistent vm block");
+		return;
 	addr = MAP_VM(addr);
 	if (vm_map[addr] == 0)
 		panic("trying to free free vm block");
@@ -139,27 +104,21 @@ void free_vm_blk(unsigned long addr)
 #define PRT_SWAP_OUT_PAGE 1
 #define PRT_SWAP_IN_PAGE 2
 #define PRT_CHOOSE_PAGE 3
-static int prt_rec[4] = {0};
+static int prt_rec[10] = {0};
 int prt_handler(int type)
 {
 	return prt_rec[type]++;
 }
 int with_handler(int handler)
 {
-	return handler < 2;
+	return handler > 512;
+	// return handler < 2;
 }
-#define MEM_SPEC (1024)
-static int spec;
+static int persist = 256;
 
-#define COPYBLK(from, to)                      \
-	__asm__("cld\n\t"                          \
-			"rep\n\t"                          \
-			"movsl\n\t" ::"c"(BLOCK_SIZE / 4), \
-			"S"(from), "D"(to))
 unsigned long swap_out_page(unsigned long page)
 {
 	int nr[4];
-	struct buffer_head *buf;
 	unsigned long *pg_table;
 	unsigned long blk;
 	int i, j, count, h;
@@ -171,7 +130,8 @@ unsigned long swap_out_page(unsigned long page)
 	if (!blk)
 		oom();
 
-	spec++;
+	mem_puda[MAP_NR(page)] |= 0x8;
+
 	h = prt_handler(PRT_SWAP_OUT_PAGE);
 	if (with_handler(h)) {
 		printk("<swap_out_page>: page=%x, blk=%x, ", page, blk);
@@ -179,18 +139,14 @@ unsigned long swap_out_page(unsigned long page)
 	for (i = 0; i < 4; i++) {
 		nr[i] = MAP_VM(blk) * 4 + i;
 	}
+	i = persist > 8 ? 8 : persist;
+	persist -= i;
 	bwrite_page(page, VM_DEV, nr);
-	if (with_handler(h)) {
-		printk("</swap_out_page>\n");
-	}
-	spec--;
+	sync_dev(VM_DEV);
+	persist += i;
+
 	// Walk through all page directory entries
 	for (i = 0; i < 1024; i++) {
-		if ((pg_dir[i] & 0xfffff001) == (page | 1)) {
-			// Try to swap out the page table
-			return 0;
-		}
-
 		if (!(pg_dir[i] & 1)) {
 			continue;
 		}
@@ -207,6 +163,10 @@ unsigned long swap_out_page(unsigned long page)
 		}
 	}
 	mem_map[MAP_NR(page)] = 0;
+	mem_puda[MAP_NR(page)] = 0;
+	if (with_handler(h)) {
+		printk("</swap_out_page>\n");
+	}
 	invalidate();
 	return blk;
 }
@@ -214,7 +174,6 @@ unsigned long swap_out_page(unsigned long page)
 void swap_in_page(unsigned long page, unsigned long hd_block)
 {
 	int nr[4];
-	struct buffer_head *buf;
 	unsigned long *pg_table;
 	int i, j, count, h;
 
@@ -222,21 +181,20 @@ void swap_in_page(unsigned long page, unsigned long hd_block)
 	if (count == 0)
 		panic("trying to swap in free vm block");
 	mem_map[MAP_NR(page)] = count;
-	mem_sda[MAP_NR(page)] = 0x1;
+	mem_puda[MAP_NR(page)] = 0x8;
 
 	h = prt_handler(PRT_SWAP_IN_PAGE);
 	if (with_handler(h)) {
 		printk("<swap_in_page> page=%x, hd_block=%x, ", page, hd_block);
 	}
-	spec++;
 	for (i = 0; i < 4; i++) {
 		nr[i] = MAP_VM(hd_block) * 4 + i;
 	}
+	i = persist > 8 ? 8 : persist;
+	persist -= i;
 	bread_page(page, VM_DEV, nr);
-	if (with_handler(h)) {
-		printk("</swap_in_page>\n");
-	}
-	spec--;
+	sync_dev(VM_DEV);
+	persist += i;
 	// Walk through all page directory entries
 	for (i = 0; i < 1024; i++) {
 		if (!(pg_dir[i] & 1))
@@ -254,6 +212,10 @@ void swap_in_page(unsigned long page, unsigned long hd_block)
 			}
 		}
 	}
+	if (with_handler(h)) {
+		printk("</swap_in_page>%s\n", persist == 256 ? " (real ending)" : "");
+	}
+	mem_puda[MAP_NR(page)] = 0x1;
 	invalidate();
 }
 /**
@@ -261,43 +223,47 @@ void swap_in_page(unsigned long page, unsigned long hd_block)
  */
 unsigned long clock_algo()
 {
-	unsigned long *pg_table;
+	unsigned long *pg_table, *dir;
 	unsigned long da, page;
 	int i, j, turn, h;
 
-	// Clear sys bit
+	dir = (unsigned long *)current->tss.cr3;
+
+	// clear user bit
 	for (i = 0; i < PAGING_PAGES; i++) {
-		mem_sda[i] &= ~0x4;
+		mem_puda[i] &= ~0x4;
 	}
 
 	// Walk through all page directory entries
 	for (i = 0; i < 1024; i++) {
-		if (!(pg_dir[i] & 1))
+		if (!(dir[i] & 1))
 			continue;
-		page = (pg_dir[i] & 0xfffff000);
-		mem_sda[MAP_NR(page)] |= 0x4;
-		pg_table = (unsigned long *)(0xfffff000 & pg_dir[i]);
+		page = (dir[i] & 0xfffff000);
+		pg_table = (unsigned long *)(0xfffff000 & dir[i]);
 		for (j = 0; j < 1024; j++) {
 			if (!(pg_table[j] & 1))
 				continue;
 			da = (pg_table[j] & 0x60) >> 5; // Get dirty and accessed bits
 			pg_table[j] &= ~0x20;			// Clear accessed bit
 			page = (pg_table[j] & 0xfffff000);
-			mem_sda[MAP_NR(page)] |= da; // Set  DA bits
+			if ((i << 22) + (j << 12) >= current->start_code && (i << 22) + (j << 12) < current->start_code + current->brk && current->executable) {
+				// Set Used bit
+				mem_puda[MAP_NR(page)] |= 0x4;
+			}
+
+			mem_puda[MAP_NR(page)] |= da; // Set  DA bits
 		}
 	}
+	j = persist;
 	for (i = 0; i < PAGING_PAGES; i++) {
 		page = (clock_ptr + PAGING_PAGES - i) % PAGING_PAGES;
-		if (!spec && page < MEM_SPEC)
-			continue;
 
 		if (mem_map[page] == 0) { // Free page
+			if (j-- > 0)
+				continue;
 			clock_ptr = (page + PAGING_PAGES - 1) % PAGING_PAGES;
 			return (page << 12) + LOW_MEM;
 		}
-	}
-	if (spec) {
-		return 0;
 	}
 	h = prt_handler(PRT_CHOOSE_PAGE);
 
@@ -306,15 +272,15 @@ unsigned long clock_algo()
 		// First turn: find a page with Used bit and D=0, A=0
 		for (i = 0; i < PAGING_PAGES; i++) {
 			page = (clock_ptr + PAGING_PAGES - i) % PAGING_PAGES;
-			if (mem_sda[page] & 0x4)
+			if (mem_puda[page] & 0x8) // pending
 				continue;
-			if (page < MEM_SPEC)
+			if (!(mem_puda[page] & 0x4)) // not user
 				continue;
 
-			if (!mem_sda[page]) {
+			if ((mem_puda[page] & 0x3) == 0) {
 				clock_ptr = (page + PAGING_PAGES - 1) % PAGING_PAGES;
 				if (with_handler(h)) {
-					printk("clock_algo: page=%x, da=%x\n", (page << 12) + LOW_MEM, mem_sda[page]);
+					printk("clock_algo[%d]: page=%x, puda=%x\n", (!turn) * 2 + 1, (page << 12) + LOW_MEM, (mem_puda[page]));
 				}
 				return (page << 12) + LOW_MEM;
 			}
@@ -323,21 +289,38 @@ unsigned long clock_algo()
 		// Clear Accessed bit when accessed
 		for (i = 0; i < PAGING_PAGES; i++) {
 			page = (clock_ptr + PAGING_PAGES - i) % PAGING_PAGES;
-			if (mem_sda[page] & 0x4)
+			if (mem_puda[page] & 0x8) // pending
 				continue;
-			if (page < MEM_SPEC)
+			if (!(mem_puda[page] & 0x4)) // not user
 				continue;
 
-			if (mem_sda[page] == 2) {
+			if ((mem_puda[page] & 0x3) == 2) {
 				clock_ptr = (page + PAGING_PAGES - 1) % PAGING_PAGES;
 				if (with_handler(h)) {
-					printk("clock_algo: page=%x, da=%x\n", (page << 12) + LOW_MEM, mem_sda[page]);
+					printk("clock_algo[%d]: page=%x, puda=%x\n", (!turn) * 2 + 2, (page << 12) + LOW_MEM, (mem_puda[page]));
 				}
 				return (page << 12) + LOW_MEM;
 			} else {
-				mem_sda[page] &= ~1;
+				mem_puda[page] &= ~1;
 			}
 		}
+	}
+	if (with_handler(h)) {
+		for (i = 0; i < 1024; i++) {
+			if (!(dir[i] & 1))
+				continue;
+			page = (dir[i] & 0xfffff000);
+			pg_table = (unsigned long *)(0xfffff000 & dir[i]);
+			for (j = 0; j < 1024; j++) {
+				if (!(pg_table[j] & 1))
+					continue;
+				page = (pg_table[j] & 0xfffff000);
+				if ((i << 22) + (j << 12) >= current->start_code && (i << 22) + (j << 12) < current->start_code + current->brk && current->executable) {
+					printk("clock_algo: page=%x, addr=%x, uda=%x\n", page, (i << 22) + (j << 12), (mem_puda[MAP_NR(page)]));
+				}
+			}
+		}
+		printk("clock_algo: no page found\n");
 	}
 	return 0;
 }
@@ -365,9 +348,8 @@ int find_on_vm(unsigned long v_addr)
 
 	h = prt_handler(PRT_FIND_ON_VM);
 	if (with_handler(h)) {
-		printk("find_on_vm: v_addr=%x, page=%x, blk=%x\n", v_addr, page, blk);
+		printk("find_on_vm: v_addr=%x, blk=%x\n", v_addr, blk);
 	}
-
 	page = clock_algo();
 	if (!page)
 		oom();
@@ -413,6 +395,7 @@ unsigned long get_free_page(void)
 		swap_out_page(page);
 
 	mem_map[MAP_NR(page)] = 1;
+	mem_puda[MAP_NR(page)] = 0x1;
 
 	// Clear page
 	for (i = 0; i < (1 << 12); i++) {
@@ -446,9 +429,19 @@ int free_page_tables(unsigned long from,unsigned long size)
 {
 	unsigned long *pg_table;
 	unsigned long * dir, nr;
+	int i, last;
 
-	if (from & 0x3fffff)
+	if (from & 0x3fffff) {
+		printk("free_page_tables called with wrong alignment: %x %x\n", from, size);
+		last = 0;
+		for (i = 0; i < VM_PAGES; i++) {
+			if (vm_map[i]) {
+				last = i;
+			}
+		}
+		printk("last vm block: %d %x\n", last, (last << 12) + LOW_VM);
 		panic("free_page_tables called with wrong alignment");
+	}
 	if (!from)
 		panic("Trying to free up swapper memory space");
 	size = (size + 0x3fffff) >> 22;
@@ -460,7 +453,7 @@ int free_page_tables(unsigned long from,unsigned long size)
 		for (nr=0 ; nr<1024 ; nr++) {
 			if (1 & *pg_table)
 				free_page(0xfffff000 & *pg_table);
-			if (0x800 & *pg_table)
+			else if (0x800 & *pg_table)
 				free_vm_blk(0xfffff000 & *pg_table);
 			*pg_table = 0;
 			pg_table++;
@@ -618,6 +611,8 @@ void get_empty_page(unsigned long address)
 	unsigned long tmp;
 
 	if (!(tmp=get_free_page()) || !put_page(tmp,address)) {
+		printk("No free pages, when trying to get %p, start_code=%p\n",
+			   address, current->start_code);
 		free_page(tmp);		/* 0 is ok - ignored */
 		oom();
 	}

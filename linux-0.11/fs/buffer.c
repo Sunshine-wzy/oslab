@@ -324,14 +324,11 @@ void bwrite_page(unsigned long address, int dev, int b[4])
 
 	for (i = 0; i < 4; i++)
 		if (b[i]) {
-			if ((bh[i] = getblk(dev, b[i])))
-				if (!bh[i]->b_uptodate)
-					ll_rw_block(READ, bh[i]);
+			bh[i] = getblk(dev, b[i]);
 		} else
 			bh[i] = NULL;
 	for (i = 0; i < 4; i++, address += BLOCK_SIZE)
 		if (bh[i]) {
-			wait_on_buffer(bh[i]);
 			COPYBLK(address, (unsigned long)bh[i]->b_data);
 			bh[i]->b_dirt = 1;
 			brelse(bh[i]);
