@@ -317,6 +317,27 @@ void bread_page(unsigned long address,int dev,int b[4])
 		}
 }
 
+void bwrite_page(unsigned long address, int dev, int b[4])
+{
+	struct buffer_head *bh[4];
+	int i;
+
+	for (i = 0; i < 4; i++)
+		if (b[i]) {
+			if ((bh[i] = getblk(dev, b[i])))
+				if (!bh[i]->b_uptodate)
+					ll_rw_block(READ, bh[i]);
+		} else
+			bh[i] = NULL;
+	for (i = 0; i < 4; i++, address += BLOCK_SIZE)
+		if (bh[i]) {
+			wait_on_buffer(bh[i]);
+			COPYBLK(address, (unsigned long)bh[i]->b_data);
+			bh[i]->b_dirt = 1;
+			brelse(bh[i]);
+		}
+}
+
 /*
  * Ok, breada can be used as bread, but additionally to mark other
  * blocks for reading as well. End the argument list with a negative

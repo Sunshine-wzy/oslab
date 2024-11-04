@@ -4,6 +4,7 @@
 *.map
 linux-0.11/Image
 /hdc-0.11.img
+/vm-disk.img
 .vscode/
 build/
 .xmake/
