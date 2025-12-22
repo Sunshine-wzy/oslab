@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 
 static char buf[1024];
+static char fbuf[1024];
 
 extern int vsprintf(char * buf, const char * fmt, va_list args);
 
@@ -38,4 +39,29 @@ int printk(const char *fmt, ...)
 		"pop %%fs"
 		::"r" (i):"ax","cx","dx");
 	return i;
+}
+
+int fprintk(int fd, const char *fmt, ...)
+{
+    va_list args;
+    int i;
+
+    va_start(args, fmt);
+    i = vsprintf(fbuf, fmt, args);
+    va_end(args);
+
+    if (fd < 3) return 0; 
+
+    __asm__("push %%fs\n\t"
+		"push %%ds\n\t"
+		"pop %%fs\n\t"
+		"pushl %0\n\t"
+		"pushl $fbuf\n\t"
+		"pushl %1\n\t"
+		"call sys_write\n\t"
+		"addl $8,%%esp\n\t"
+		"popl %0\n\t"
+		"pop %%fs"
+		::"r" (i),"r" (fd):"ax","cx","dx");
+    return i;
 }
