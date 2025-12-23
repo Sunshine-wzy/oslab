@@ -172,6 +172,7 @@ repeat:
 				current->cstime += (*p)->stime;
 				flag = (*p)->pid;
 				code = (*p)->exit_code;
+				fprintk(3, "%ld\t%c\t%ld\n", flag, 'E', jiffies);
 				release(*p);
 				put_fs_long(code,stat_addr);
 				return flag;
@@ -184,6 +185,9 @@ repeat:
 		if (options & WNOHANG)
 			return 0;
 		current->state=TASK_INTERRUPTIBLE;
+		if (current->pid) {
+			fprintk(3, "%ld\t%c\t%ld\n", current->pid, 'W', jiffies);
+		}
 		schedule();
 		if (!(current->signal &= ~(1<<(SIGCHLD-1))))
 			goto repeat;
