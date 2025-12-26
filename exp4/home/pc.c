@@ -27,6 +27,11 @@ int main() {
     char data;
     char in = 0, out = 0;
     int status;
+    
+    printf("The number of Producer-Consumer buffers is %d\n", BUFFER_SIZE);
+    printf("The number of Producers is: %d\n", NUM_PRODUCERS);
+    printf("The number of Consumers is: %d\n", NUM_CONSUMERS);
+    fflush(stdout);
 
     /* 初始化共享缓冲区文件 */
     /* 文件格式: [in指针(4字节)] [out指针(4字节)] [数据区...] */
@@ -40,68 +45,70 @@ int main() {
 
     sem_mutex = sem_open(SEM_MUTEX, 1);
     sem_empty = sem_open(SEM_EMPTY, BUFFER_SIZE);
-    sem_full  = sem_open(SEM_FULL, 0);
+    sem_full = sem_open(SEM_FULL, 0);
 
     printf("Semaphores created: mutex=%d, empty=%d, full=%d\n", sem_mutex, sem_empty, sem_full);
     fflush(stdout);
 
+    /* 创建生产者进程 */
+    for(i = 0; i < NUM_PRODUCERS; i++) {
+        if((pid = fork()) == 0) {
+            printf("The ID of Producer is: %d\n", getpid());
+            fflush(stdout);
+            
+            for(j = 0; j < NUM_ITEMS; j++) {
+                sem_wait(sem_empty);
+                sem_wait(sem_mutex);
+
+                fd = open("buffer.dat", O_RDWR, 0);
+                lseek(fd, 0, SEEK_SET);
+                read(fd, &in, sizeof(int));
+                
+                printf("The processor with ID=%d PRODUCE a item=%d into buffer[%d]\n", getpid(), j, in);
+                fflush(stdout);
+                
+                lseek(fd, 2 * sizeof(int) + in * sizeof(int), SEEK_SET);
+                write(fd, &j, sizeof(int));
+
+                in = (in + 1) % BUFFER_SIZE;
+                lseek(fd, 0, SEEK_SET);
+                write(fd, &in, sizeof(int));
+                close(fd);
+
+                sem_post(sem_mutex);
+                sem_post(sem_full);
+            }
+            exit(0);
+        }
+    }
+
     /* 创建消费者进程 */
     for(i = 0; i < NUM_CONSUMERS; i++) {
         if((pid = fork()) == 0) {
+            printf("The ID of Consumer is: %d\n", getpid());
+            fflush(stdout);
+            
             for(j = 0; j < NUM_ITEMS; j++) {
                 sem_wait(sem_full);
                 sem_wait(sem_mutex);
 
                 fd = open("buffer.dat", O_RDWR, 0);
-                
                 lseek(fd, sizeof(int), SEEK_SET);
                 read(fd, &out, sizeof(int));
                 
                 lseek(fd, 2 * sizeof(int) + out * sizeof(int), SEEK_SET);
                 read(fd, &data, sizeof(int));
                 
-                printf("%d: Consumer %d consumes item %d from buffer %d\n", getpid(), i, data, out);
+                printf("The processor with ID=%d CONSUME a item=%d from buffer[%d]\n", getpid(), data, out);
                 fflush(stdout);
 
                 out = (out + 1) % BUFFER_SIZE;
                 lseek(fd, sizeof(int), SEEK_SET);
                 write(fd, &out, sizeof(int));
-                
                 close(fd);
 
                 sem_post(sem_mutex);
                 sem_post(sem_empty);
-            }
-            exit(0);
-        }
-    }
-
-    /* 创建生产者进程 */
-    for(i = 0; i < NUM_PRODUCERS; i++) {
-        if((pid = fork()) == 0) {
-            for(j = 0; j < NUM_ITEMS; j++) {
-                sem_wait(sem_empty);
-                sem_wait(sem_mutex);
-
-                fd = open("buffer.dat", O_RDWR, 0);
-                
-                lseek(fd, 0, SEEK_SET);
-                read(fd, &in, sizeof(int));
-                
-                lseek(fd, 2 * sizeof(int) + in * sizeof(int), SEEK_SET);
-                write(fd, &j, sizeof(int));
-                
-                printf("%d: Producer %d produces item %d to buffer %d\n", getpid(), i, j, in);
-                fflush(stdout);
-
-                in = (in + 1) % BUFFER_SIZE;
-                lseek(fd, 0, SEEK_SET);
-                write(fd, &in, sizeof(int));
-                
-                close(fd);
-
-                sem_post(sem_mutex);
-                sem_post(sem_full);
             }
             exit(0);
         }

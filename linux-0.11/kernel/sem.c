@@ -70,10 +70,13 @@ int sys_sem_wait(int sem_id)
     if (sem_id < 0 || sem_id >= SEM_MAX_NUM || semaphores[sem_id].occupied == 0)
         return -1;
 
+    fprintk(1, "The processor with ID=%d GET the semaphore with name=%s\n", current->pid, semaphores[sem_id].name);    
     cli();
     semaphores[sem_id].value--;
     if (semaphores[sem_id].value < 0)
     {
+        fprintk(1, "The processor with ID=%d SLEEPON the semaphore with name=%s\n", 
+               current->pid, semaphores[sem_id].name);
         sleep_on(&(semaphores[sem_id].queue));
     }
     sti();
@@ -82,13 +85,21 @@ int sys_sem_wait(int sem_id)
 
 int sys_sem_post(int sem_id)
 {
+    struct task_struct *p;
+    
     if (sem_id < 0 || sem_id >= SEM_MAX_NUM || semaphores[sem_id].occupied == 0)
         return -1;
 
+    fprintk(1, "The processor with ID=%d PUT the semaphore with name=%s\n", current->pid, semaphores[sem_id].name);
     cli();
     semaphores[sem_id].value++;
     if (semaphores[sem_id].value <= 0)
     {
+        p = semaphores[sem_id].queue;
+        if (p) {
+            fprintk(1, "The processor with ID=%d WAKEUP the processor with ID=%d on the semaphore with name=%s\n", 
+                   current->pid, p->pid, semaphores[sem_id].name);
+        }
         wake_up(&(semaphores[sem_id].queue));
     }
     sti();
