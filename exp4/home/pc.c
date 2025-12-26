@@ -14,6 +14,7 @@ _syscall1(int, sem_unlink, const char *, name)
 #define NUM_PRODUCERS 1
 #define NUM_CONSUMERS 1
 #define NUM_ITEMS 20
+#define USE_SEMAPHORES 1
 
 const char *SEM_MUTEX = "mutex";
 const char *SEM_FULL  = "full";
@@ -57,9 +58,10 @@ int main() {
             fflush(stdout);
             
             for(j = 0; j < NUM_ITEMS; j++) {
+#if USE_SEMAPHORES
                 sem_wait(sem_empty);
                 sem_wait(sem_mutex);
-
+#endif
                 fd = open("buffer.dat", O_RDWR, 0);
                 lseek(fd, 0, SEEK_SET);
                 read(fd, &in, sizeof(int));
@@ -74,9 +76,10 @@ int main() {
                 lseek(fd, 0, SEEK_SET);
                 write(fd, &in, sizeof(int));
                 close(fd);
-
+#if USE_SEMAPHORES
                 sem_post(sem_mutex);
                 sem_post(sem_full);
+#endif
             }
             exit(0);
         }
@@ -89,9 +92,10 @@ int main() {
             fflush(stdout);
             
             for(j = 0; j < NUM_ITEMS; j++) {
+#if USE_SEMAPHORES
                 sem_wait(sem_full);
                 sem_wait(sem_mutex);
-
+#endif
                 fd = open("buffer.dat", O_RDWR, 0);
                 lseek(fd, sizeof(int), SEEK_SET);
                 read(fd, &out, sizeof(int));
@@ -106,9 +110,10 @@ int main() {
                 lseek(fd, sizeof(int), SEEK_SET);
                 write(fd, &out, sizeof(int));
                 close(fd);
-
+#if USE_SEMAPHORES
                 sem_post(sem_mutex);
                 sem_post(sem_empty);
+#endif
             }
             exit(0);
         }
