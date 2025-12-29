@@ -217,7 +217,12 @@ setup_paging:
 	movl %cr0,%eax
 	orl $0x80000000,%eax
 	movl %eax,%cr0		/* set paging (PG) bit */
+	movl $trans_aaa,%eax
+	movl (%eax), %eax
 	ret			/* this also flushes prefetch-queue */
+
+trans_aaa:
+	.long  0xaaaaaaaa
 
 .align 2
 .word 0
