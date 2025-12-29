@@ -8,6 +8,7 @@
 
 .text
 .globl keyboard_interrupt
+.globl DisplayState
 
 
 
@@ -234,7 +235,7 @@ func_table:
  .long 0x415b5b1b,0x425b5b1b,0x435b5b1b,0x445b5b1b
  .long 0x455b5b1b,0x465b5b1b,0x475b5b1b,0x485b5b1b
  .long 0x495b5b1b,0x4a5b5b1b,0x4b5b5b1b,0x4c5b5b1b
-# 295 "linux-0.11/kernel/chr_drv/keyboard_src/keyboard.S"
+# 296 "linux-0.11/kernel/chr_drv/keyboard_src/keyboard.S"
 key_map:
  .byte 0,27
  .ascii "1234567890-="
@@ -283,7 +284,7 @@ alt_map:
  .byte 0,0,0,0,0,0,0
  .byte '|
  .fill 10,1,0
-# 453 "linux-0.11/kernel/chr_drv/keyboard_src/keyboard.S"
+# 454 "linux-0.11/kernel/chr_drv/keyboard_src/keyboard.S"
 do_self:
  lea alt_map,%ebx
  testb $0x20,mode
@@ -328,6 +329,26 @@ minus: cmpb $1,e0
  xorl %ebx,%ebx
  jmp put_queue
 
+dispcontrol_f12:
+    pushl %eax
+    pushl %ebx
+    movl DisplayState, %eax
+    xorl $0x01, %eax
+    movl %eax, DisplayState
+    popl %ebx
+    popl %eax
+    ret
+
+dispcontrol_f11:
+    pushl %eax
+    pushl %ebx
+    movl DisplayState, %eax
+    xorl $0x02, %eax
+    movl %eax, DisplayState
+    popl %ebx
+    popl %eax
+    ret
+
 
 
 
@@ -355,8 +376,8 @@ key_table:
  .long cursor,cursor,do_self,cursor
  .long cursor,cursor,do_self,cursor
  .long cursor,cursor,cursor,cursor
- .long none,none,do_self,func
- .long func,none,none,none
+ .long none,none,do_self,dispcontrol_f11
+ .long dispcontrol_f12,none,none,none
  .long none,none,none,none
  .long none,none,none,none
  .long none,none,none,none

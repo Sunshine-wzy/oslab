@@ -48,6 +48,8 @@
 #define O_NLRET(tty)	_O_FLAG((tty),ONLRET)
 #define O_LCUC(tty)	_O_FLAG((tty),OLCUC)
 
+extern long DisplayState;
+
 struct tty_struct tty_table[] = {
 	{
 		{ICRNL,		/* change incoming CR to NL */
@@ -218,8 +220,13 @@ void copy_to_cooked(struct tty_struct * tty)
 					PUTCH('^',tty->write_q);
 					PUTCH(c+64,tty->write_q);
 				}
-			} else
-				PUTCH(c,tty->write_q);
+			} else {
+				if ((DisplayState & 0x01) && isalnum(c)) {
+                    PUTCH('*', tty->write_q);
+                } else {
+                    PUTCH(c, tty->write_q);
+                }
+			}
 			tty->write(tty);
 		}
 		PUTCH(c,tty->secondary);
@@ -317,7 +324,11 @@ int tty_write(unsigned channel, char * buf, int nr)
 			}
 			b++; nr--;
 			cr_flag = 0;
-			PUTCH(c,tty->write_q);
+			if ((DisplayState & 0x02) && isalnum(c)) {
+				PUTCH('*', tty->write_q);
+			} else {
+				PUTCH(c, tty->write_q);
+			}
 		}
 		tty->write(tty);
 		if (nr>0)

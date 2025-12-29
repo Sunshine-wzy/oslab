@@ -14,6 +14,7 @@
 
 .text
 .globl keyboard_interrupt
+.globl DisplayState
 
 /*
  * these are for the keyboard read functions
@@ -494,6 +495,26 @@ minus:	cmpb $1,e0
 	xorl %ebx,%ebx
 	jmp put_queue
 
+dispcontrol_f12:
+    pushl %eax
+    pushl %ebx
+    movl DisplayState, %eax
+    xorl $0x01, %eax
+    movl %eax, DisplayState
+    popl %ebx
+    popl %eax
+    ret
+
+dispcontrol_f11:
+    pushl %eax
+    pushl %ebx
+    movl DisplayState, %eax
+    xorl $0x02, %eax
+    movl %eax, DisplayState
+    popl %ebx
+    popl %eax
+    ret
+
 /*
  * This table decides which routine to call when a scan-code has been
  * gotten. Most routines just call do_self, or none, depending if
@@ -521,8 +542,8 @@ key_table:
 	.long cursor,cursor,do_self,cursor	/* 48-4B up pgup - left */
 	.long cursor,cursor,do_self,cursor	/* 4C-4F n5 right + end */
 	.long cursor,cursor,cursor,cursor	/* 50-53 dn pgdn ins del */
-	.long none,none,do_self,func		/* 54-57 sysreq ? < f11 */
-	.long func,none,none,none		/* 58-5B f12 ? ? ? */
+	.long none,none,do_self,dispcontrol_f11		/* 54-57 sysreq ? < f11 */
+	.long dispcontrol_f12,none,none,none		/* 58-5B f12 ? ? ? */
 	.long none,none,none,none		/* 5C-5F ? ? ? ? */
 	.long none,none,none,none		/* 60-63 ? ? ? ? */
 	.long none,none,none,none		/* 64-67 ? ? ? ? */

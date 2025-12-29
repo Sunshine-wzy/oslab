@@ -76,6 +76,8 @@ static unsigned long	npar,par[NPAR];
 static unsigned long	ques=0;
 static unsigned char	attr=0x07;
 
+long DisplayState;
+
 static void sysbeep(void);
 
 /*
