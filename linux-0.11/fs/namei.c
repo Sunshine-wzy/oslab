@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 
 #define ACC_MODE(x) ("\004\002\006\377"[(x)&O_ACCMODE])
+#define SET_PROC(m) (((m) & ~S_IFMT) | S_IFPROC)
 
 /*
  * comment out this line if you want names > NAME_LEN chars to be
@@ -440,8 +441,11 @@ int sys_mknod(const char * filename, int mode, int dev)
 		iput(dir);
 		return -ENOSPC;
 	}
+	if (MAJOR(dev) >= 80) {
+        mode = SET_PROC(mode);
+    }
 	inode->i_mode = mode;
-	if (S_ISBLK(mode) || S_ISCHR(mode))
+	if (S_ISBLK(mode) || S_ISCHR(mode) || S_ISPROC(mode))
 		inode->i_zone[0] = dev;
 	inode->i_mtime = inode->i_atime = CURRENT_TIME;
 	inode->i_dirt = 1;
