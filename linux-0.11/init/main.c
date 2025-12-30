@@ -51,6 +51,7 @@ extern void mem_init(long start, long end);
 extern long rd_init(long mem_start, int length);
 extern long kernel_mktime(struct tm * tm);
 extern long startup_time;
+extern void swap_init(void);
 
 /*
  * This is set up by the setup-routine at boot-time
@@ -133,6 +134,7 @@ void main(void)		/* This really IS void, no error here. */
 	buffer_init(buffer_memory_end);
 	hd_init();
 	floppy_init();
+	swap_init();
 	sti();
 	move_to_user_mode();
 	if (!fork()) {		/* we count on this going ok */

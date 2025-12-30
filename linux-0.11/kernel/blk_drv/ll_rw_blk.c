@@ -163,3 +163,54 @@ void blk_dev_init(void)
 		request[i].next = NULL;
 	}
 }
+
+/*
+ * ll_rw_page - Low-level read/write a full page (4KB = 8 sectors)
+ * Used by swap subsystem to bypass buffer cache
+ * rw: READ or WRITE
+ * page_addr: physical address of page
+ * dev: device number
+ * block: starting sector number
+ */
+void ll_rw_page(int rw, unsigned long page_addr, int dev, unsigned long block)
+{
+	struct request *req;
+	unsigned int major = MAJOR(dev);
+
+	if (major >= NR_BLK_DEV || !(blk_dev[major].request_fn)) {
+		printk("ll_rw_page: bad device %04x\n", dev);
+		return;
+	}
+
+	/* Find free request */
+repeat:
+	req = request + NR_REQUEST;
+	while (--req >= request)
+		if (req->dev < 0)
+			break;
+
+	if (req < request) {
+		sleep_on(&wait_for_request);
+		goto repeat;
+	}
+
+	/* Fill request structure */
+	req->dev = dev;
+	req->cmd = rw;
+	req->errors = 0;
+	req->sector = block;
+	req->nr_sectors = 8;  /* 4KB page = 8 sectors (512 bytes each) */
+	req->buffer = (char *)page_addr;
+	req->waiting = current;
+	req->bh = NULL;  /* No buffer head for direct I/O */
+	req->next = NULL;
+
+	/* Add to request queue */
+	add_request(blk_dev + major, req);
+
+	/* Wait for I/O completion */
+	cli();
+	while (req->waiting)
+		sleep_on(&req->waiting);
+	sti();
+}

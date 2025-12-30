@@ -27,6 +27,7 @@
 #include <linux/sched.h>
 #include <linux/head.h>
 #include <linux/kernel.h>
+#include <linux/swap.h>
 
 volatile void do_exit(long code);
 
@@ -54,7 +55,11 @@ static long HIGH_MEMORY = 0;
 #define copy_page(from,to) \
 __asm__("cld ; rep ; movsl"::"S" (from),"D" (to),"c" (1024))
 
-static unsigned char mem_map [ PAGING_PAGES ] = {0,};
+unsigned char mem_map [ PAGING_PAGES ] = {0,};
+
+/* Memory pressure management */
+unsigned long nr_free_pages = 0;
+struct task_struct *wait_for_free_page = NULL;
 
 /*
  * Get physical address of first (actually last :-) free page, and mark it
@@ -63,6 +68,18 @@ static unsigned char mem_map [ PAGING_PAGES ] = {0,};
 unsigned long get_free_page(void)
 {
 register unsigned long __res asm("ax");
+
+repeat:
+	/* Check for critical memory pressure before allocation */
+	if (nr_free_pages < 32 /* FREE_PAGE_CRITICAL */) {
+		check_memory_pressure();
+		if (nr_free_pages < 32) {
+			/* Still critical, sleep and wait */
+			printk("get_free_page: critical memory, sleeping\n");
+			sleep_on(&wait_for_free_page);
+			goto repeat;
+		}
+	}
 
 __asm__("std ; repne ; scasb\n\t"
 	"jne 1f\n\t"
@@ -79,6 +96,16 @@ __asm__("std ; repne ; scasb\n\t"
 	:"0" (0),"i" (LOW_MEM),"c" (PAGING_PAGES),
 	"D" (mem_map+PAGING_PAGES-1)
 	);
+
+	if (__res) {
+		/* Successfully allocated, update count and check thresholds */
+		if (nr_free_pages > 0)
+			nr_free_pages--;
+		if (nr_free_pages < 128 /* FREE_PAGE_LOW_WATER */) {
+			check_memory_pressure();
+		}
+	}
+
 return __res;
 }
 
@@ -93,7 +120,15 @@ void free_page(unsigned long addr)
 		panic("trying to free nonexistent page");
 	addr -= LOW_MEM;
 	addr >>= 12;
-	if (mem_map[addr]--) return;
+	if (mem_map[addr]--) {
+		/* Page still has references */
+		if (mem_map[addr] == 0) {
+			/* Last reference freed */
+			nr_free_pages++;
+			wake_up(&wait_for_free_page);
+		}
+		return;
+	}
 	mem_map[addr]=0;
 	panic("trying to free free page");
 }
@@ -282,6 +317,24 @@ void get_empty_page(unsigned long address)
 }
 
 /*
+ * get_pte_for_address - Get PTE for a virtual address in current process
+ * Returns pointer to PTE, or NULL if page table not present
+ */
+static unsigned long *get_pte_for_address(unsigned long address)
+{
+	unsigned long *pg_dir = (unsigned long *)0;  /* Page directory at 0 */
+	unsigned long *pg_table;
+	unsigned long pde_idx = (address >> 22) & 0x3ff;
+	unsigned long pte_idx = (address >> 12) & 0x3ff;
+
+	if (!(pg_dir[pde_idx] & 1))
+		return NULL;  /* Page table not present */
+
+	pg_table = (unsigned long *)(pg_dir[pde_idx] & 0xfffff000);
+	return &pg_table[pte_idx];
+}
+
+/*
  * try_to_share() checks the page at address "address" in the task "p",
  * to see if it exists, and if it is clean. If so, share it with the current
  * task.
@@ -369,9 +422,25 @@ void do_no_page(unsigned long error_code,unsigned long address)
 	unsigned long tmp;
 	unsigned long page;
 	int block,i;
+	unsigned long *pte;
+	unsigned long swap_slot;
 
 	address &= 0xfffff000;
 	tmp = address - current->start_code;
+
+	/* Check if page is swapped out */
+	pte = get_pte_for_address(address);
+	if (pte && PTE_IS_SWAPPED(*pte)) {
+		swap_slot = PTE_GET_SWAP_SLOT(*pte);
+		SWAP_LOG("Page fault at %p: swapped page, slot %lu\n", address, swap_slot);
+		if (swap_in_page(swap_slot, address) == 0) {
+			return;  /* Success */
+		}
+		/* Swap-in failed, fall through to normal handling */
+		printk("Swap-in failed for slot %lu at address %p\n", swap_slot, address);
+	}
+
+	/* Original demand-load logic */
 	if (!current->executable || tmp >= current->end_data) {
 		get_empty_page(address);
 		return;
@@ -409,6 +478,15 @@ void mem_init(long start_mem, long end_mem)
 	end_mem >>= 12;
 	while (end_mem-->0)
 		mem_map[i++]=0;
+
+	/* Initialize free page count */
+	nr_free_pages = 0;
+	for (i = 0; i < PAGING_PAGES; i++) {
+		if (mem_map[i] == 0)
+			nr_free_pages++;
+	}
+	printk("Memory: %lu KB available (%lu free pages)\n",
+		(nr_free_pages * 4), nr_free_pages);
 }
 
 void calc_mem(void)

@@ -23,6 +23,9 @@
 #define _S(nr) (1<<((nr)-1))
 #define _BLOCKABLE (~(_S(SIGKILL) | _S(SIGSTOP)))
 
+/* External function for clock page replacement */
+extern void clock_hand1_scan(void);
+
 void show_task(int nr,struct task_struct * p)
 {
 	int i,j = 4096-sizeof(struct task_struct);
@@ -306,6 +309,7 @@ void do_timer(long cpl)
 {
 	extern int beepcount;
 	extern void sysbeepstop(void);
+	static int clock_tick_count = 0;
 
 	if (beepcount)
 		if (!--beepcount)
@@ -316,11 +320,17 @@ void do_timer(long cpl)
 	else
 		current->stime++;
 
+	/* Run clock hand 1 every 10 ticks (100ms) */
+	if (++clock_tick_count >= 10) {
+		clock_tick_count = 0;
+		clock_hand1_scan();
+	}
+
 	if (next_timer) {
 		next_timer->jiffies--;
 		while (next_timer && next_timer->jiffies <= 0) {
 			void (*fn)(void);
-			
+
 			fn = next_timer->fn;
 			next_timer->fn = NULL;
 			next_timer = next_timer->next;
